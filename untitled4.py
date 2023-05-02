@@ -274,6 +274,42 @@ gene = np.concatenate([alpha.reshape(-1) for alpha in alphas])
 
 print(gene)
 
+# Convert the final architecture to a PyTorch model
+class FinalModel(nn.Module):
+    def __init__(self, final_arch):
+        super(FinalModel, self).__init__()
+
+        # Define the stem
+        self.stem = nn.Sequential(
+            nn.Conv2d(3, 36, 3, padding=1, bias=False),
+            nn.BatchNorm2d(36),
+            nn.ReLU(inplace=True),
+        )
+
+        # Define the cells
+        C_curr = 36
+        self.cells = nn.ModuleList()
+        for genotype in final_arch:
+            cell = Cell(genotype, C_prev_prev=0, C_prev=C_curr, C=C_curr)
+            self.cells.append(cell)
+            C_prev_prev, C_prev, C_curr = C_prev, C_curr, 4 * C_curr
+
+        # Define the classifier
+        self.classifier = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Flatten(),
+            nn.Linear(4 * C_curr, 10),
+        )
+
+    def forward(self, x):
+        x = self.stem(x)
+        for cell in self.cells:
+            x = cell(x)
+        x = self.classifier(x)
+        return x
+
+# Create an instance of the final PyTorch model
+model_final = FinalModel(gene)
 
 
 model_final.eval()
