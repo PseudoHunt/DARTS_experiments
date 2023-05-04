@@ -1,0 +1,40 @@
+import torch
+
+# Define your network here
+class MyNet(torch.nn.Module):
+    def __init__(self):
+        super(MyNet, self).__init__()
+        self.conv1 = torch.nn.Conv2d(3, 16, kernel_size=3, stride=1, padding=1)
+        self.conv2 = torch.nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=1)
+        self.fc1 = torch.nn.Linear(32*8*8, 10)
+    
+    def forward(self, x):
+        x = torch.relu(self.conv1(x))
+        x = torch.relu(self.conv2(x))
+        x = x.view(-1, 32*8*8)
+        x = self.fc1(x)
+        return x
+
+# Define your input tensor here
+x = torch.randn(1, 3, 32, 32)
+
+# Compute the output of the network
+net = MyNet()
+y = net(x)
+
+# Compute the sensitivity of each neuron using a Taylor series expansion
+sensitivity = []
+for param in net.parameters():
+    shape = param.data.shape
+    tensor = torch.zeros(shape)
+    tensor.requires_grad = True
+    out = net(x)
+    grad_out = torch.ones_like(out)
+    for i in range(shape.numel()):
+        tensor.data.reshape(-1)[i] += 1e-6
+        out = net(x)
+        loss = torch.sum(out*grad_out)
+        loss.backward()
+        grad = tensor.grad.data.clone().view(shape)
+        sensitivity.append(torch.abs(grad).mean().item())
+        tensor.grad.zero_()
