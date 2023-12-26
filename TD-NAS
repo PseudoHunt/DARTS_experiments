@@ -1,0 +1,88 @@
+import tensorflow as tf
+from tensorflow.keras import layers, models
+from tensorflow.keras.datasets import cifar10
+from tensorly.decomposition import tucker
+
+# Load CIFAR-10 dataset
+(x_train, y_train), (x_test, y_test) = cifar10.load_data()
+x_train, x_test = x_train / 255.0, x_test / 255.0  # Normalize pixel values to the range [0, 1]
+
+# Define a larger convolutional neural network
+def create_large_cnn():
+    model = models.Sequential()
+    
+    model.add(layers.Conv2D(64, (3, 3), activation='relu', input_shape=(32, 32, 3), padding='same'))
+    model.add(layers.Conv2D(64, (3, 3), activation='relu', padding='same'))
+    model.add(layers.MaxPooling2D((2, 2)))
+    
+    model.add(layers.Conv2D(128, (3, 3), activation='relu', padding='same'))
+    model.add(layers.Conv2D(128, (3, 3), activation='relu', padding='same'))
+    model.add(layers.MaxPooling2D((2, 2)))
+    
+    model.add(layers.Conv2D(256, (3, 3), activation='relu', padding='same'))
+    model.add(layers.Conv2D(256, (3, 3), activation='relu', padding='same'))
+    model.add(layers.Conv2D(256, (3, 3), activation='relu', padding='same'))
+    model.add(layers.MaxPooling2D((2, 2)))
+    
+    model.add(layers.Flatten())
+    
+    model.add(layers.Dense(512, activation='relu'))
+    model.add(layers.Dropout(0.5))
+    model.add(layers.Dense(512, activation='relu'))
+    model.add(layers.Dropout(0.5))
+    
+    model.add(layers.Dense(10, activation='softmax'))
+    
+    return model
+
+# Create and compile the original model
+original_large_model = create_large_cnn()
+original_large_model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+
+# Train the original model
+original_large_model.fit(x_train, y_train, epochs=5, validation_data=(x_test, y_test))
+
+# Extract the convolutional layers you want to compress
+conv_layers_to_compress = [2, 5, 8]  # Indices of the convolutional layers to compress
+original_weights_list = [original_large_model.layers[i].get_weights() for i in conv_layers_to_compress]
+
+# Apply Tucker decomposition to reduce rank for each convolutional layer
+approx_weights_list = []
+for i, original_weights in zip(conv_layers_to_compress, original_weights_list):
+    rank = [original_weights[0].shape[0] // 2, 3, 3, original_weights[0].shape[3] // 2]
+    approx_weights = tucker(original_weights[0], rank=rank)
+    approx_biases = original_weights[1]  # Biases remain unchanged
+    approx_weights_list.append([approx_weights, approx_biases])
+
+# Create a new model with the custom ApproxConv2D layers
+class ApproxConv2D(tf.keras.layers.Layer):
+    def __init__(self, rank, **kwargs):
+        super(ApproxConv2D, self).__init__(**kwargs)
+        self.rank = rank
+        self.conv_layer = tf.keras.layers.Conv2D(filters=rank[-1], kernel_size=(3, 3), padding='same', activation='relu')
+
+    def build(self, input_shape):
+        input_channels = input_shape[-1]
+        kernel_shape = (3, 3, input_channels, self.rank[-1])
+        self.kernel = self.add_weight("kernel", shape=kernel_shape, initializer="glorot_uniform", trainable=True)
+
+    def call(self, inputs):
+        return self.conv_layer(inputs)
+
+new_model = tf.keras.Sequential()
+for i, layer in enumerate(original_large_model.layers):
+    if i in conv_layers_to_compress:
+        # Replace the original convolutional layer with the ApproxConv2D layer
+        rank = approx_weights_list[conv_layers_to_compress.index(i)][0].shape
+        new_model.add(ApproxConv2D(rank, name=f'approx_conv2d_{i}'))
+        new_model.layers[-1].set_weights(approx_weights_list[conv_layers_to_compress.index(i)])
+    else:
+        # Copy unchanged layers
+        new_model.add(layer)
+
+# Compile the new model
+new_model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+
+# Evaluate both models
+original_large_model.evaluate(x_test, y_test)
+new_model.evaluate(x_test, y_test)
