@@ -1,0 +1,59 @@
+slide  3 
+
+single line abstract
+HArdware aware DiffusionNAG introduces a novel framework for neural architecture generation using diffusion models, 
+guided by predictors to efficiently produce device-optimal architectures with desired properties
+
+Technical impact
+DiffusionNAG advances the field of neural architecture search by introducing a more efficient, flexible, 
+and scalable method for generating high-performance neural architectures tailored to specific Mobile phone devices.
+
+Business impact
+DiffusionNAG's business impact includes significant cost reductions and faster time-to-market by speeding up neural architecture search. 
+It enables customized, high-performance AI models tailored to specific mobile device requirements.
+The framework supports scalable Transferable NAS, facilitating efficient adaptation to new mobile devices without extensive retraining. 
+
+
+Independant claims
+
+Neural Architecture Generation with Diffusion Models:
+
+    DiffusionNAG introduces the use of diffusion models to generate neural architectures. It utilizes a forward diffusion process that perturbs the neural architecture distribution to a known prior distribution, typically Gaussian, and then uses a reverse diffusion process to generate architectures from this noise​
+
+​​
+
+    ​.
+
+Predictor-Guided Generation:
+
+    The framework incorporates parameterized predictors to guide the generative process. These predictors adjust the score function during the reverse diffusion process, ensuring that the generated architectures meet specific desired properties, such as high accuracy or robustness​
+
+​​
+
+    ​.
+
+Efficiency and Computational Savings:
+
+    DiffusionNAG significantly improves the efficiency of neural architecture search (NAS) by reducing the need for repetitive sampling and training of architectures. This leads to substantial computational savings and speedup in the architecture generation process, achieving up to 35 times speedup compared to traditional methods​
+
+​​
+
+    ​.
+
+Support for Transferable NAS:
+
+    The framework supports Transferable NAS by leveraging dataset-aware predictors conditioned on specific datasets. This allows for efficient adaptation to new tasks and datasets without retraining the predictors, enhancing the practicality and scalability of the method across various applications​
+
+    ​.
+
+Single Training for Score Network:
+
+    The score network, which approximates the score function in the reverse diffusion process, is trained only once for each search space. This reduces the training overhead and allows for efficient generation of architectures with varying target properties by simply changing the predictor​
+
+​​​.
+
+Main patentable point
+
+The framework incorporates parameterized predictors to guide the generative process. this method leverages Hardware and Accuracy aware predictors conditioned on a specific mobile devices.
+
+
