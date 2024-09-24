@@ -1,0 +1,117 @@
+In the context of the LoRA code from the earlier example, where we applied LoRA to convolutional layers in the U-Net model of Stable Diffusion, I’ll explain how to freeze the Conv2d(3x3) layers while allowing the LoRA layers to remain trainable.
+
+Here’s a breakdown of the steps needed to freeze the Conv2d(3x3) layers while keeping the LoRA weights trainable:
+
+1. Modify the CustomLoraConv2d Class to Freeze Conv2d(3x3)
+
+In the previous CustomLoraConv2d class, the original convolution layer (Conv2d(3x3)) was trainable. To freeze it, we will modify the CustomLoraConv2d class to ensure that the weights of the Conv2d(3x3) layer are not updated during training.
+
+Here’s the modified version:
+
+import torch
+import torch.nn as nn
+
+# Custom LoRA layer for Conv2d(3x3), where the Conv2d(3x3) is frozen
+class CustomLoraConv2d(nn.Module):
+    def __init__(self, conv_layer, rank=4, alpha=16):
+        super(CustomLoraConv2d, self).__init__()
+        self.conv = conv_layer  # The original Conv2d(3x3) layer
+
+        # Freeze the original Conv2d(3x3) layer
+        for param in self.conv.parameters():
+            param.requires_grad = False  # Disable gradient updates for this layer
+
+        # LoRA decomposition (trainable low-rank approximation)
+        self.lora_left = nn.Conv2d(self.conv.in_channels, rank, kernel_size=1, bias=False)
+        self.lora_right = nn.Conv2d(rank, self.conv.out_channels, kernel_size=1, bias=False)
+
+        # Initialize LoRA layers to zero to start with no influence
+        nn.init.zeros_(self.lora_left.weight)
+        nn.init.zeros_(self.lora_right.weight)
+
+        self.alpha = alpha  # Scaling factor for the LoRA residual
+
+    def forward(self, x):
+        # Forward pass through the frozen Conv2d(3x3) layer
+        out = self.conv(x)
+
+        # LoRA residual update (trainable)
+        lora_residual = self.lora_right(self.lora_left(x)) * self.alpha
+
+        # Add the LoRA residual to the output of the original frozen conv layer
+        return out + lora_residual
+
+Explanation:
+
+	•	self.conv: This is the original Conv2d(3x3) layer. We iterate through its parameters and set requires_grad=False, which freezes this layer and prevents it from being updated during backpropagation.
+	•	LoRA layers (lora_left and lora_right): These layers are responsible for the trainable LoRA adaptation. They remain trainable (requires_grad=True by default) and will update during training.
+	•	Residual computation: The LoRA residual is computed and added to the output of the frozen Conv2d(3x3) layer, so the trainable LoRA layers modify the frozen convolution.
+
+2. Apply CustomLoraConv2d to Conv2d(3x3) Layers in the Model
+
+Next, we apply this custom LoRA layer to all Conv2d(3x3) layers in the U-Net of Stable Diffusion. This ensures that the Conv2d(3x3) layers are frozen and only the LoRA components are updated.
+
+def apply_custom_lora_to_convs(unet, rank=4, alpha=16):
+    for name, module in unet.named_modules():
+        # Check for Conv2d layers with 3x3 kernel
+        if isinstance(module, nn.Conv2d) and module.kernel_size == (3, 3):
+            # Replace the Conv2d(3x3) layer with the custom LoRA-augmented layer
+            custom_lora_layer = CustomLoraConv2d(module, rank=rank, alpha=alpha)
+            parent, attr = name.rsplit('.', 1)
+            setattr(getattr(unet, parent), attr, custom_lora_layer)
+
+# Apply the custom LoRA layers to Conv2d(3x3) layers in the U-Net
+apply_custom_lora_to_convs(pipe.unet)
+
+Explanation:
+
+	•	apply_custom_lora_to_convs: This function iterates over all the layers of the U-Net model and replaces any Conv2d(3x3) layers with the custom CustomLoraConv2d that we defined. The convolutional layers will be frozen, but the LoRA layers added will be trainable.
+
+3. Training with Fixed Conv2d(3x3) Layers
+
+Now, you can train the model, and only the LoRA layers will be updated, while the Conv2d(3x3) layers will remain frozen.
+
+Here’s an example of how to set up the training process:
+
+from torch.optim import AdamW
+
+# Only train LoRA parameters (i.e., the parameters with requires_grad=True)
+lora_params = [p for p in pipe.unet.parameters() if p.requires_grad]
+
+# Define an optimizer for the trainable LoRA layers
+optimizer = AdamW(lora_params, lr=5e-4)
+
+# Example training loop
+for epoch in range(num_epochs):
+    for batch in dataloader:
+        images, prompts = batch
+        
+        # Forward pass through the U-Net (with frozen Conv2d(3x3) and trainable LoRA)
+        outputs = pipe.unet(images)
+
+        # Calculate loss
+        loss = loss_fn(outputs, targets)
+
+        # Backpropagation and optimization
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        print(f"Epoch {epoch}, Loss: {loss.item()}")
+
+4. Verifying that Conv2d(3x3) Layers are Frozen
+
+To ensure that the Conv2d(3x3) layers are frozen and not trainable, you can check the requires_grad status of the parameters in the model:
+
+# Check which parameters are frozen (requires_grad=False)
+for name, param in pipe.unet.named_parameters():
+    if not param.requires_grad:
+        print(f"Layer {name} is frozen.")
+
+This will print out all the layers in the U-Net where the parameters are frozen (i.e., requires_grad=False). The frozen layers should include the Conv2d(3x3) layers you targeted.
+
+Conclusion:
+
+	•	The CustomLoraConv2d class allows you to freeze the Conv2d(3x3) layer while keeping the LoRA layers (lora_left and lora_right) trainable. The LoRA layers are responsible for learning low-rank updates to the output of the frozen convolutional layers.
+	•	You can apply this custom LoRA layer to all Conv2d(3x3) layers in the model using apply_custom_lora_to_convs().
+	•	During training, only the LoRA weights will be updated, and the frozen convolutional layers will remain fixed.
