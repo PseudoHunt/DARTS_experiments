@@ -1,0 +1,125 @@
+Let’s walk through a practical example comparing SVD-only compression and MPO-based compression for a fully connected layer in a neural network. The goal is to compress the weight matrix while comparing how SVD and MPO handle the operation.
+
+Scenario
+
+We’ll use a single dense (fully connected) layer:
+	•	Input size:  784  (e.g., flattened MNIST images).
+	•	Output size:  512  (hidden units).
+	•	Weight matrix  W \in \mathbb{R}^{784 \times 512} .
+
+Step 1: SVD-Based Compression
+
+In this approach:
+	1.	Decompose the weight matrix  W  using SVD.
+	2.	Truncate the singular values to retain only the top  r  components.
+	3.	Replace the original dense layer with two smaller layers:
+	•	First layer: Reduces dimensionality with  U \Sigma  ( W_1 ).
+	•	Second layer: Projects back to the output space with  V^T  ( W_2 ).
+
+import torch
+import torch.nn as nn
+
+class SVDCompressedLayer(nn.Module):
+    def __init__(self, weight_matrix, rank):
+        super(SVDCompressedLayer, self).__init__()
+        # Perform SVD
+        U, S, V = torch.svd(weight_matrix)
+
+        # Truncate to desired rank
+        U_truncated = U[:, :rank]
+        S_truncated = S[:rank]
+        V_truncated = V[:, :rank]
+
+        # Define reduced layers
+        self.W1 = nn.Linear(weight_matrix.size(0), rank, bias=False)  # U @ S
+        self.W2 = nn.Linear(rank, weight_matrix.size(1), bias=False)  # V^T
+
+        # Assign weights
+        self.W1.weight.data = (U_truncated @ torch.diag(S_truncated)).T
+        self.W2.weight.data = V_truncated.T
+
+    def forward(self, x):
+        x = self.W1(x)
+        x = self.W2(x)
+        return x
+
+Step 2: MPO-Based Compression
+
+In this approach:
+	1.	Decompose  W  into MPO cores using SVD.
+	2.	Use the MPO representation to sequentially process the input vector.
+
+class MPOCompressedLayer(nn.Module):
+    def __init__(self, weight_matrix, input_shape, output_shape, rank):
+        super(MPOCompressedLayer, self).__init__()
+        # Reshape weight matrix for MPO decomposition
+        W_reshaped = weight_matrix.view(input_shape[0], input_shape[1], output_shape[0], output_shape[1])
+
+        # Perform SVD on reshaped dimensions
+        U, S, V = torch.svd(W_reshaped.flatten(0, 1))  # Flatten input-output dimensions
+        U_truncated = U[:, :rank]
+        S_truncated = S[:rank]
+        V_truncated = V[:, :rank]
+
+        # Define MPO cores
+        self.core1 = nn.Parameter(U_truncated @ torch.diag(S_truncated))
+        self.core2 = nn.Parameter(V_truncated.T)
+
+    def forward(self, x):
+        batch_size = x.size(0)
+        x = x.view(batch_size, -1)  # Flatten input
+
+        # Apply MPO operation
+        intermediate = torch.tensordot(x, self.core1, dims=1)
+        output = torch.tensordot(intermediate, self.core2, dims=1)
+        return output
+
+Step 3: Comparing the Two Approaches
+
+Example Workflow
+
+# Define original dense layer
+input_dim = 784
+output_dim = 512
+rank = 16  # Compression rank
+
+original_layer = nn.Linear(input_dim, output_dim, bias=False)
+weight_matrix = original_layer.weight.data.clone()
+
+# SVD Compression
+svd_layer = SVDCompressedLayer(weight_matrix, rank)
+
+# MPO Compression
+input_shape = (28, 28)  # Example: MNIST input
+output_shape = (16, 32)  # Arbitrary reshaping
+mpo_layer = MPOCompressedLayer(weight_matrix, input_shape, output_shape, rank)
+
+# Test on dummy input
+dummy_input = torch.randn(1, input_dim)
+
+original_output = original_layer(dummy_input)
+svd_output = svd_layer(dummy_input)
+mpo_output = mpo_layer(dummy_input)
+
+print("Original Output:", original_output)
+print("SVD Output:", svd_output)
+print("MPO Output:", mpo_output)
+
+Key Differences
+
+Feature	SVD Compression	MPO Compression
+Decomposition Form	Two smaller layers using  U \Sigma  and  V^T .	Hierarchical decomposition into MPO cores.
+Dimensionality Handling	Operates on flattened 2D matrices.	Operates on multi-dimensional tensors.
+Focus	Global correlation approximation.	Local correlations and input-output mappings.
+Efficiency	Fast for general-purpose compression.	More efficient for structured data.
+Modeling Hierarchy	No hierarchy captured.	Captures hierarchical multi-dimensional relationships.
+
+When to Use What?
+	•	SVD Compression:
+	•	Ideal for simple, global dimensionality reduction tasks.
+	•	Works well for unstructured weight matrices.
+	•	MPO Compression:
+	•	Best suited for structured or multi-dimensional data.
+	•	Efficient for high-dimensional tensors or operator-like structures.
+
+Would you like further customization or a deeper dive into specific parts of the implementation?
